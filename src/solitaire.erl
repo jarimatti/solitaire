@@ -84,13 +84,28 @@ pile_face_down({_U, D}) ->
 
 
 %%------------------------------------------------------------------------------
+%% A PileIndex is non_neg_integer.
+-type pile_index() :: non_neg_integer().
+
+
+%%------------------------------------------------------------------------------
 %% A Tableau has 8 piles or lanes. A lane is an empty pile.
 -type tableau() :: array:array(pile() | lane).
 
 %% Produce a new empty tableau with N lanes.
--spec tableau(non_neg_integer()) -> tableau().
+-spec tableau(pile_index()) -> tableau().
 tableau(N) when is_integer(N), N > 0 ->
     array:new([N, fixed, {default, lane}]).
+
+%% Produce a Pile from the Tableau.
+-spec tableau_pile(pile_index(), tableau()) -> pile().
+tableau_pile(N, T) ->
+    array:get(N - 1, T).
+
+%% Produce a new tableau with the pile N set to input.
+-spec tableau_pile(pile_index(), pile(), tableau()) -> tableau().
+tableau_pile(N, P, T) ->
+    array:set(N - 1, P, T).
 
 
 %%------------------------------------------------------------------------------
@@ -181,6 +196,18 @@ klondike(D) ->
               tableau = T}.
 
 
+%% Produce the Tableau of the Klondike.
+-spec klondike_tableau(klondike()) -> tableau().
+klondike_tableau(#klondike{tableau = T}) ->
+    T.
+
+
+%% Produce a Klondike with specified Tableau.
+-spec klondike_tableau(tableau(), klondike()) -> klondike().
+klondike_tableau(T, K) ->
+    K#klondike{tableau = T}.
+
+
 %% Produce initial Tableau and remaining Stock given a list of cards.
 -spec make_tableau([card()]) -> {tableau(), stock()}.
 make_tableau(D) ->
@@ -194,12 +221,6 @@ make_tableau(D, T, N, X) ->
     {[D1H | D1T], D2} = lists:split(N, D),
     T1 = tableau_pile(N, pile(D1H, D1T), T),
     make_tableau(D2, T1, N + 1, X).
-
-
-%% Produce a new tableau with the pile N set to input.
--spec tableau_pile(non_neg_integer(), pile(), tableau()) -> tableau().
-tableau_pile(N, P, T) ->
-    array:set(N - 1, P, T).
 
 
 %%------------------------------------------------------------------------------
@@ -268,3 +289,48 @@ rank_succ(jack) ->
     queen;
 rank_succ(queen) ->
     king.
+
+
+%%------------------------------------------------------------------------------
+%% Move a card from Tableau Pile to Foundation.
+
+%% Produce a Klondike where the card from Tableau Pile is moved to Foundation.
+-spec move_card_to_foundation(pile_index(), klondike()) -> klondike().
+move_card_to_foundation(I, K) ->
+    T = klondike_tableau(K),
+    mcf(tableau_remove_top_card(I, T), K).
+
+mcf({none, _T}, K) ->
+    K;
+mcf({C, T}, K) ->
+    F = klondike_foundation(card_suit(C), K),
+    case can_move_to_foundation(C, F) of
+        true ->
+            K1 = klondike_foundation(card_suit(C), [C | F], K),
+            klondike_tableau(T, K1);
+        false ->
+            K
+    end.
+
+
+%% Produce the top card and new Tableau with top card removed from pile.
+-spec tableau_remove_top_card(pile_index(), tableau()) -> {card() | none, tableau()}.
+tableau_remove_top_card(I, T) ->
+    {C, P} = pile_remove_top_card(tableau_pile(I, T)),
+    {C, tableau_pile(I, P, T)}.
+
+
+%% Produce the top card (or none) and the a new pile by removint topmost card.
+-spec pile_remove_top_card(pile()) -> {card() | none, pile()}.
+pile_remove_top_card(lane) ->
+    {none, lane};
+pile_remove_top_card({[H], []}) ->
+    {H, lane};
+pile_remove_top_card({[H], [DH | DT]}) ->
+    {H, {[DH], DT}};
+pile_remove_top_card({[H | T], D}) ->
+    {H, {T, D}}.
+
+
+%%------------------------------------------------------------------------------
+%% TODO: Move a sequence of cards from one pile to another.
