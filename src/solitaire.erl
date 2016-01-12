@@ -13,8 +13,12 @@
 
 %%------------------------------------------------------------------------------
 %% A Suit represents the suit of a playing card.
--type suit() :: spade | cross | heart | diamond.
+-type suit() :: spade | club | heart | diamond.
 
+
+%%------------------------------------------------------------------------------
+%% A Color is red or black.
+-type color() :: red | black.
 
 %%------------------------------------------------------------------------------
 %% A Rank is the face value of a playing card.
@@ -60,15 +64,19 @@ stock_is_empty(_) ->
 
 %%------------------------------------------------------------------------------
 %% A Pile is a sequence of cards, where bottom cards can be face down.
--type pile() :: {[card()], [card()]}.
+-type pile() :: {[card()], [card()]} | lane.
 
 %% Produce a new, empty pile.
 -spec pile() -> pile().
 pile() ->
-    pile([], []).
+    lane.
 
 %% Produce a new pile from two lists of face-up and face-down cards.
 -spec pile([card()], [card()]) -> pile().
+pile([], []) ->
+    lane;
+pile([], [H | T]) ->
+    {[H], T};
 pile(U, D) ->
     {U, D}.
 
@@ -82,6 +90,23 @@ pile_face_up({U, _D}) ->
 pile_face_down({_U, D}) ->
     D.
 
+%% Produce a new pile with the sequence of cards on top.
+-spec pile_place_sequence([card()], pile()) -> pile().
+pile_place_sequence(Cs, lane) ->
+    {Cs, []};
+pile_place_sequence(Cs, {U, D}) ->
+    {Cs ++ U, D}.
+
+%% Produce a sequence of cards from pile.
+-spec pile_sequence(non_neg_integer(), pile()) -> {[card()], pile()}.
+pile_sequence(_X, lane) ->
+    {[], lane};
+pile_sequence(X, P = {U, _D}) when X > length(U) ->
+    {[], P};
+pile_sequence(X, {U, D}) ->
+    {S, U1} = lists:split(X, U),
+    {S, pile(U1, D)}.
+
 
 %%------------------------------------------------------------------------------
 %% A PileIndex is non_neg_integer.
@@ -90,7 +115,7 @@ pile_face_down({_U, D}) ->
 
 %%------------------------------------------------------------------------------
 %% A Tableau has 8 piles or lanes. A lane is an empty pile.
--type tableau() :: array:array(pile() | lane).
+-type tableau() :: array:array(pile()).
 
 %% Produce a new empty tableau with N lanes.
 -spec tableau(pile_index()) -> tableau().
@@ -129,6 +154,11 @@ foundation() ->
                    tableau :: tableau()}).
 
 -type klondike() :: #klondike{}.
+
+%% Produce the Stock of the Klondike.
+-spec klondike_stock(klondike()) -> stock().
+klondike_stock(#klondike{stock = S}) ->
+    S.
 
 %% Produce the Waste of the Klondike.
 -spec klondike_waste(klondike()) -> waste().
@@ -219,7 +249,7 @@ make_tableau(D, T, N, X) when N > X ->
     {T, D};
 make_tableau(D, T, N, X) ->
     {[D1H | D1T], D2} = lists:split(N, D),
-    T1 = tableau_pile(N, pile(D1H, D1T), T),
+    T1 = tableau_pile(N, pile([D1H], D1T), T),
     make_tableau(D2, T1, N + 1, X).
 
 
@@ -333,4 +363,256 @@ pile_remove_top_card({[H | T], D}) ->
 
 
 %%------------------------------------------------------------------------------
-%% TODO: Move a sequence of cards from one pile to another.
+%% Move a sequence of cards from one pile to another.
+
+
+%% Produce a Klondike where a sequence has been moved from one pile to another.
+%% Do nothing if the move is not legal.
+-spec move_sequence({pile_index(), non_neg_integer()},
+                    pile_index(), klondike()) -> klondike().
+move_sequence(From, To, K) ->
+    T = tms(From, To, klondike_tableau(K)),
+    klondike_tableau(T, K).
+
+tms({FP, FC}, TP, T) ->
+    Pa = tableau_pile(FP, T),
+    Pb = tableau_pile(TP, T),
+    {S, Pa1} = pile_sequence(FC, Pa),
+    case is_sequence(S) and can_move(S, Pb) of
+        true ->
+            Pb1 = pile_place_sequence(S, Pb),
+            tableau_pile(FP, Pa1, tableau_pile(TP, Pb1, T));
+        false ->
+            T
+    end.
+    
+
+%% Produce true if the sequence is not empty and valid.
+is_sequence([]) ->
+    false;
+is_sequence([H | T]) ->
+    F = fun (A, {B, true}) ->
+                CM = cm(color(card_suit(A)), color(card_suit(B))),
+                VM = card_rank(A) == rank_succ(card_rank(B)),
+                {A, CM and VM};
+            (_, {C, false}) ->
+                {C, false}
+        end,
+    {_C, R} = lists:foldl(F, {H, true}, T),
+    R.
+
+-ifdef(TEST).
+
+is_sequence_empty_test() ->
+    false = is_sequence([]).
+
+is_sequence_invalid_color_test() ->
+    false = is_sequence([card(3, spade),
+                         card(4, heart),
+                         card(5, diamond)]).
+
+is_sequence_invalid_rank_test() ->
+    false = is_sequence([card(3, spade),
+                         card(4, heart),
+                         card(3, club)]).
+
+is_sequence_valid_test() ->
+    true = is_sequence([card(3, spade),
+                        card(4, heart),
+                        card(5, club),
+                        card(6, diamond)]).
+
+-endif.
+
+
+%% Produce true if the sequence can be moved on top of the pile.
+can_move([], _) ->
+    false;
+can_move(S, lane) ->
+    king == card_rank(lists:last(S));
+can_move(S, P) ->
+    A = lists:last(S),
+    B = hd(pile_face_up(P)),
+    CM = cm(color(card_suit(A)), color(card_suit(B))),
+    RM = rank_succ(card_rank(A)) == card_rank(B),
+    CM and RM.
+
+-ifdef(TEST).
+
+can_move_empty_seq_test() ->
+    false = can_move([], lane).
+
+can_move_king_to_lane_test() ->
+    true = can_move([card(king, heart)], lane).
+
+can_move_other_to_lane_test() ->
+    false = can_move([card(5, heart)], lane).
+
+can_move_valid_test() ->
+    true = can_move([card(5, heart)], pile([card(6, spade)], [])).
+
+can_move_invalid_color_test() ->
+    false = can_move([card(5, heart)], pile([card(6, heart)], [])).
+
+can_move_invalid_rank_test() ->
+    false = can_move([card(5, heart)], pile([card(4, spade)], [])).
+
+-endif.
+
+
+%% Produce true if the colors are different.
+-spec cm(color(), color()) -> boolean().
+cm(black, red) ->
+    true;
+cm(red, black) ->
+    true;
+cm(_, _) ->
+    false.
+
+
+%% Produce suite color.
+-spec color(suit()) -> color().
+color(spade) ->
+    black;
+color(club) ->
+    black;
+color(heart) ->
+    red;
+color(diamond) ->
+    red.
+
+
+%%------------------------------------------------------------------------------
+%% Move a card from Waste to Tableau Pile.
+
+%% Produce Klondike, where a card has been moved to Pile from Waste.
+-spec waste_to_pile(pile_index(), klondike()) -> klondike().
+waste_to_pile(I, K) ->
+    case klondike_waste(K) of
+        [] ->
+            K;
+        [H | T] ->
+            S = [H],
+            KT = klondike_tableau(K),
+            P = tableau_pile(I, KT),
+            case can_move(S, P) of
+                true ->
+                    P1 = pile_place_sequence(S, P),
+                    klondike_waste(
+                      T,
+                      klondike_tableau(tableau_pile(I, P1, KT), K));
+                false ->
+                    K
+            end
+    end.
+
+
+%%------------------------------------------------------------------------------
+%% Simple Console I/O.
+
+%% solitaire:print_klondike(solitaire:klondike(solitaire:deck())).
+
+-spec print_klondike(klondike()) -> ok.
+print_klondike(K) ->
+    S = length(klondike_stock(K)),
+    W = format_card(klondike_waste(K)),
+    F1 = format_card(klondike_foundation(spade, K)),
+    F2 = format_card(klondike_foundation(heart, K)),
+    F3 = format_card(klondike_foundation(club, K)),
+    F4 = format_card(klondike_foundation(diamond, K)),
+    T = format_tableau(klondike_tableau(K)),
+    io:format("    [~3b] [~3s]       [~3s] [~3s] [~3s] [~3s]~n", [S, W, F1, F2, F3, F4]),
+    io:format("~n"),
+    io:format("~s~n", [T]).
+
+
+format_card([]) ->
+    "";
+format_card([H | _T]) ->
+    format_card(H);
+format_card(C) ->
+    lists:flatten([format_rank(card_rank(C)), format_suit(card_suit(C))]).
+
+
+format_rank(ace) ->
+    $A;
+format_rank(jack) ->
+    $J;
+format_rank(queen) ->
+    $Q;
+format_rank(king) ->
+    $K;
+format_rank(X) when is_integer(X), X >= 2, X =< 10 ->
+    io_lib:format("~b", [X]).
+
+
+format_suit(spade) ->
+    $s;
+format_suit(heart) ->
+    $h;
+format_suit(club) ->
+    $c;
+format_suit(diamond) ->
+    $d.
+
+
+format_tableau(T) ->
+    A = format_face_down_counts(T),
+    B = format_face_up_cards(T),
+    lists:flatten(A ++ B).
+
+
+format_face_down_counts(T) ->
+    L = lists:map(fun (lane) ->
+                          0;
+                      (P) ->
+                          length(pile_face_down(P))
+                  end,
+                  array:to_list(T)),
+    io_lib:format("    [~3b] [~3b] [~3b] [~3b] [~3b] [~3b] [~3b]~n", L).
+    
+
+format_face_up_cards(T) ->
+    format_face_up_cards(T, max_pile_length(T), "").
+
+
+format_face_up_cards(_T, 0, Acc) ->
+    lists:reverse(Acc);
+format_face_up_cards(T, X, Acc) ->
+    format_face_up_cards(T, X - 1, [fpiles(T, X) | Acc]).
+
+
+fpiles(T, X) ->
+    L = lists:map(fun (lane) ->
+                          "";
+                      (P) ->
+                          U = pile_face_up(P),
+                          case X =< length(U) of
+                              true ->
+                                  format_card(lists:nth(X, U));
+                              false ->
+                                  ""
+                      end
+                  end,
+                  array:to_list(T)),
+    io_lib:format("~2b: [~3s] [~3s] [~3s] [~3s] [~3s] [~3s] [~3s]~n", [X | L]).
+
+
+max_pile_length(T) ->
+    lists:max(
+      lists:map(fun (lane) ->
+                        0;
+                    (P) ->
+                        length(pile_face_up(P))
+                end,
+                array:to_list(T))).
+
+
+mf(waste, K) ->
+    move_waste_to_foundation(K);
+mf(P, K) ->
+    move_card_to_foundation(P, K).
+
+mc({P1, R}, P2, K) ->
+    move_sequence({P1, R}, P2, K).
+

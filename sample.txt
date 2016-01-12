@@ -1,0 +1,25 @@
+K = solitaire:klondike(solitaire:deck()).
+solitaire:print_klondike(K).
+K2 = solitaire:mf(1, K).
+solitaire:print_klondike(K2).
+K3 = solitaire:mc({2, 1}, 6, K2).
+solitaire:print_klondike(K3).
+K4 = solitaire:mc({2, 1}, 6, K3).
+solitaire:print_klondike(K4).
+K5 = solitaire:mc({6, 2}, 3, K4).
+solitaire:print_klondike(K5).
+
+K6 = solitaire:turn_from_stock(K5).
+solitaire:print_klondike(K6).
+K7 = solitaire:turn_from_stock(K6).
+solitaire:print_klondike(K7).
+K8 = solitaire:turn_from_stock(K7).
+solitaire:print_klondike(K8).
+K9 = solitaire:turn_from_stock(K8).
+solitaire:print_klondike(K9).
+
+K10 = solitaire:move_waste_to_foundation(K9).
+solitaire:print_klondike(K10).
+
+K11 = solitaire:waste_to_pile(1, K10).
+solitaire:print_klondike(K11).
